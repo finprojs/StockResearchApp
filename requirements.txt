@@ -1,0 +1,7 @@
+flask
+flask-cors
+aiohttp
+pandas
+numpy
+openpyxl
+gunicorn

@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GARO Algo — Stock Screener</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* ── TOKENS ── */
+:root {
+  --ink:     #0d0f12;
+  --ink2:    #1a1d23;
+  --ink3:    #242830;
+  --wire:    rgba(255,255,255,0.07);
+  --wire2:   rgba(255,255,255,0.13);
+  --dust:    #5a6278;
+  --fog:     #8b94a8;
+  --paper:   #c8cdd8;
+  --snow:    #e8eaef;
+  --lime:    #b8ff57;   /* signature accent — terminal-green shifted warm */
+  --sky:     #4da6ff;
+  --rose:    #ff6b6b;
+  --amber:   #ffb938;
+  --teal:    #2dd4bf;
+  --purple:  #a78bfa;
+  --fh: 'Space Grotesk', sans-serif;
+  --fm: 'Space Mono', monospace;
+  --r: 8px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--ink);
+  color: var(--snow);
+  font-family: var(--fh);
+  font-size: 14px;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── HEADER ── */
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 32px; height: 56px;
+  border-bottom: 1px solid var(--wire);
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(13,15,18,0.92);
+  backdrop-filter: blur(12px);
+}
+.logo {
+  font-family: var(--fm); font-size: 15px; font-weight: 700;
+  color: var(--lime); letter-spacing: .05em;
+  display: flex; align-items: center; gap: 10px;
+}
+.logo-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--lime); animation: blink 2s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+.header-right { display: flex; align-items: center; gap: 16px; }
+.mkt-badge {
+  font-family: var(--fm); font-size: 11px; padding: 3px 10px;
+  border-radius: 20px; border: 1px solid var(--wire2); color: var(--fog);
+}
+.btn-clear {
+  font-family: var(--fm); font-size: 11px; color: var(--dust);
+  background: none; border: 1px solid var(--wire); border-radius: 5px;
+  padding: 4px 10px; cursor: pointer; transition: all .2s;
+}
+.btn-clear:hover { color: var(--rose); border-color: var(--rose); }
+
+/* ── LAYOUT ── */
+.wrap { max-width: 1360px; margin: 0 auto; padding: 28px 32px 60px; }
+
+/* ── CONTROL PANEL ── */
+.cpanel {
+  background: var(--ink2);
+  border: 1px solid var(--wire);
+  border-radius: 12px;
+  padding: 24px 28px 20px;
+  margin-bottom: 28px;
+}
+.cpanel-top {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 20px;
+}
+.cpanel-title { font-family: var(--fm); font-size: 11px; color: var(--dust); text-transform: uppercase; letter-spacing: .12em; }
+.mkt-toggle { display: flex; gap: 6px; }
+.mkt-btn {
+  font-family: var(--fm); font-size: 12px; padding: 5px 14px;
+  border-radius: 5px; border: 1px solid var(--wire2);
+  background: transparent; color: var(--fog); cursor: pointer; transition: all .2s;
+}
+.mkt-btn.active { background: var(--lime); color: var(--ink); border-color: var(--lime); font-weight: 700; }
+
+.fields { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+.fg { display: flex; flex-direction: column; gap: 5px; }
+.fg label { font-family: var(--fm); font-size: 10px; color: var(--dust); text-transform: uppercase; letter-spacing: .1em; }
+.fg input, .fg select {
+  background: var(--ink3); border: 1px solid var(--wire2); border-radius: var(--r);
+  color: var(--snow); font-family: var(--fm); font-size: 12px; padding: 8px 11px;
+  outline: none; transition: border-color .2s;
+}
+.fg input:focus { border-color: var(--lime); }
+.fg input[type=date]   { width: 146px; }
+.fg input[type=number] { width: 88px; }
+.fg input[type=password] { width: 200px; }
+
+/* FILE DROP */
+.fdrop {
+  border: 1.5px dashed var(--wire2); border-radius: var(--r);
+  padding: 14px 20px; cursor: pointer; transition: all .2s;
+  text-align: center; min-width: 200px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+.fdrop:hover { border-color: var(--lime); background: rgba(184,255,87,.04); }
+.fdrop.loaded { border-color: var(--lime); border-style: solid; }
+.fdrop-icon { font-size: 18px; }
+.fdrop-text { font-size: 12px; color: var(--fog); }
+.fdrop-name { font-size: 11px; color: var(--lime); font-family: var(--fm); }
+#fInput { display: none; }
+
+.btn-run {
+  background: var(--lime); color: var(--ink);
+  font-family: var(--fm); font-weight: 700; font-size: 12px;
+  border: none; border-radius: var(--r); padding: 10px 24px;
+  cursor: pointer; transition: opacity .2s, transform .1s;
+  text-transform: uppercase; letter-spacing: .08em; white-space: nowrap;
+  align-self: flex-end;
+}
+.btn-run:hover  { opacity: .85; }
+.btn-run:active { transform: scale(.98); }
+.btn-run:disabled { opacity: .35; cursor: not-allowed; }
+
+/* PROGRESS */
+.prog { margin-top: 16px; display: none; }
+.prog.show { display: block; }
+.prog-track { background: var(--ink3); border-radius: 3px; height: 3px; overflow: hidden; }
+.prog-fill  { height: 100%; background: var(--lime); border-radius: 3px; width: 0; transition: width .4s ease; }
+.prog-meta  { display: flex; justify-content: space-between; margin-top: 6px; }
+.prog-msg   { font-family: var(--fm); font-size: 11px; color: var(--fog); }
+.prog-pct   { font-family: var(--fm); font-size: 11px; color: var(--lime); }
+.status-msg { font-family: var(--fm); font-size: 11px; color: var(--fog); margin-top: 8px; min-height: 16px; }
+
+/* ── METRICS STRIP ── */
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px,1fr)); gap: 10px; margin-bottom: 24px; }
+.mc {
+  background: var(--ink2); border: 1px solid var(--wire); border-radius: var(--r);
+  padding: 14px 16px;
+}
+.mc-label { font-family: var(--fm); font-size: 9px; color: var(--dust); text-transform: uppercase; letter-spacing: .12em; margin-bottom: 7px; }
+.mc-val   { font-family: var(--fm); font-size: 20px; font-weight: 700; line-height: 1; }
+.mc-sub   { font-size: 11px; color: var(--fog); margin-top: 4px; }
+.mc.lime  .mc-val { color: var(--lime); }
+.mc.sky   .mc-val { color: var(--sky);  }
+.mc.amber .mc-val { color: var(--amber); }
+.mc.up    .mc-val { color: var(--teal); }
+.mc.down  .mc-val { color: var(--rose); }
+
+/* ── CHART CARD ── */
+.card {
+  background: var(--ink2); border: 1px solid var(--wire);
+  border-radius: 12px; padding: 22px 24px; margin-bottom: 18px;
+}
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+.card-title { font-size: 15px; font-weight: 600; color: var(--snow); }
+.card-sub   { font-size: 11px; color: var(--dust); margin-top: 3px; margin-bottom: 14px; }
+.card-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.leg-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--fog); }
+.leg-dot  { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+.chart-box { position: relative; width: 100%; }
+
+.btn-ai {
+  background: transparent; border: 1px solid var(--wire2);
+  border-radius: 5px; color: var(--lime); font-family: var(--fm); font-size: 10px;
+  padding: 4px 10px; cursor: pointer; transition: all .2s;
+  text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; flex-shrink: 0;
+}
+.btn-ai:hover    { background: rgba(184,255,87,.08); border-color: var(--lime); }
+.btn-ai:disabled { opacity: .35; cursor: not-allowed; }
+
+/* AI BOX */
+.aibox {
+  margin-top: 14px; background: var(--ink3);
+  border: 1px solid var(--wire); border-left: 2px solid var(--lime);
+  border-radius: var(--r); padding: 14px 16px; display: none;
+}
+.aibox.show { display: block; }
+.ai-label { font-family: var(--fm); font-size: 9px; color: var(--lime); text-transform: uppercase; letter-spacing: .14em; margin-bottom: 8px; }
+.ai-text  { font-size: 13px; line-height: 1.8; color: var(--paper); }
+.ai-text.loading { color: var(--dust); animation: shimmer 1.4s infinite; }
+@keyframes shimmer { 0%,100%{opacity:.5} 50%{opacity:1} }
+
+/* SHORTLIST TABLE */
+.tbl-scroll { overflow-x: auto; margin-top: 14px; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th {
+  font-family: var(--fm); font-size: 9px; color: var(--dust);
+  text-transform: uppercase; letter-spacing: .1em; font-weight: 400;
+  padding: 8px 12px; border-bottom: 1px solid var(--wire); text-align: left;
+}
+td { padding: 10px 12px; border-bottom: 1px solid var(--wire); vertical-align: middle; }
+tbody tr:hover td { background: var(--ink3); }
+.t-ticker { color: var(--lime); font-family: var(--fm); font-weight: 700; }
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 20px;
+  font-family: var(--fm); font-size: 10px; font-weight: 700;
+}
+.badge-hi  { background: rgba(45,212,191,.15); color: var(--teal);  }
+.badge-md  { background: rgba(255,185,56,.15);  color: var(--amber); }
+.badge-lo  { background: rgba(255,107,107,.15); color: var(--rose);  }
+.dma-up    { color: var(--teal); font-size: 11px; }
+.dma-dn    { color: var(--rose); font-size: 11px; }
+
+/* EXPORT BTN */
+.btn-export {
+  font-family: var(--fm); font-size: 11px; color: var(--fog);
+  background: var(--ink3); border: 1px solid var(--wire2); border-radius: 5px;
+  padding: 5px 12px; cursor: pointer; transition: all .2s;
+}
+.btn-export:hover { color: var(--lime); border-color: var(--lime); }
+
+/* EMPTY */
+.empty { text-align: center; padding: 72px 20px; }
+.empty-icon { font-size: 42px; margin-bottom: 16px; }
+.empty h3   { font-size: 18px; font-weight: 600; color: var(--snow); margin-bottom: 8px; }
+.empty p    { font-size: 13px; color: var(--fog); line-height: 1.75; }
+.empty code {
+  display: inline-block; background: var(--ink3); border: 1px solid var(--wire2);
+  padding: 2px 8px; border-radius: 4px; font-family: var(--fm); font-size: 12px; color: var(--lime);
+}
+
+/* ERRORS PANEL */
+.err-panel {
+  background: rgba(255,107,107,.06); border: 1px solid rgba(255,107,107,.2);
+  border-radius: var(--r); padding: 12px 16px; margin-bottom: 18px; font-size: 12px; color: var(--rose);
+}
+.err-panel summary { cursor: pointer; font-family: var(--fm); font-size: 11px; }
+
+/* RESPONSIVE */
+@media (max-width: 700px) {
+  .wrap { padding: 16px; }
+  .header { padding: 0 16px; }
+  .cpanel { padding: 16px; }
+  .fields { flex-direction: column; }
+  .fg input[type=date], .fg input[type=number], .fg input[type=password] { width: 100%; }
+  .fdrop { width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="logo">
+    <div class="logo-dot"></div>
+    GARO ALGO
+  </div>
+  <div class="header-right">
+    <span class="mkt-badge" id="hdr-mkt">— market —</span>
+    <button class="btn-clear" onclick="clearCache()">Clear Cache</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- CONTROL PANEL -->
+  <div class="cpanel">
+    <div class="cpanel-top">
+      <span class="cpanel-title">Screener Parameters</span>
+      <div class="mkt-toggle">
+        <button class="mkt-btn active" id="btn-IN"  onclick="setMarket('IN')">🇮🇳 India (NSE)</button>
+        <button class="mkt-btn"        id="btn-US"  onclick="setMarket('US')">🇺🇸 US</button>
+      </div>
+    </div>
+
+    <div class="fields">
+      <div class="fg">
+        <label>Ticker Universe</label>
+        <div class="fdrop" id="fdrop" onclick="document.getElementById('fInput').click()">
+          <div class="fdrop-icon">📂</div>
+          <div class="fdrop-text">Upload Ticker.xlsx</div>
+          <div class="fdrop-name" id="fname"></div>
+        </div>
+        <input type="file" id="fInput" accept=".xlsx,.xls" onchange="onFile(this)">
+      </div>
+
+      <div class="fg">
+        <label>Start Date</label>
+        <input type="date" id="startDate">
+      </div>
+      <div class="fg">
+        <label>End Date</label>
+        <input type="date" id="endDate">
+      </div>
+      <div class="fg">
+        <label>Min Trading Range %</label>
+        <input type="number" id="minTR" value="2" min="0" step="0.5">
+      </div>
+      <div class="fg">
+        <label>Min Market Cap ($B)</label>
+        <input type="number" id="minMC" value="0.5" min="0" step="0.1">
+      </div>
+      <div class="fg">
+        <label>Avg TR Lookback (days)</label>
+        <input type="number" id="lookback" value="100" min="10" step="10">
+      </div>
+      <div class="fg">
+        <label>Anthropic Key (AI Analysis)</label>
+        <input type="password" id="apiKey" placeholder="sk-ant-…">
+      </div>
+      <button class="btn-run" id="runBtn" onclick="runScreen()">▶ Run Screener</button>
+    </div>
+
+    <div class="prog" id="prog">
+      <div class="prog-track"><div class="prog-fill" id="progFill"></div></div>
+      <div class="prog-meta">
+        <span class="prog-msg" id="progMsg"></span>
+        <span class="prog-pct" id="progPct"></span>
+      </div>
+    </div>
+    <div class="status-msg" id="statusMsg"></div>
+  </div>
+
+  <!-- RESULTS -->
+  <div id="results">
+    <div class="empty">
+      <div class="empty-icon">📈</div>
+      <h3>Upload your ticker universe and run the screener</h3>
+      <p>
+        Upload a <code>.xlsx</code> file with <code>Ticker</code> and <code>Industry</code> columns.<br>
+        Select your market, set filters, and click <strong>Run Screener</strong>.<br>
+        Data is fetched in parallel from Stooq — no API key needed.
+      </p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── STATE ──────────────────────────────────────────────────────────────────────
+let market      = 'IN';
+let uploadedFile = null;
+let charts      = {};
+let G           = {};
+
+const BACKEND = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? 'http://localhost:5050'
+  : 'https://garo-algo.onrender.com';  // ← update this after Render deploy
+
+// ── INIT ───────────────────────────────────────────────────────────────────────
+(function init() {
+  const today = new Date();
+  const past  = new Date(); past.setDate(today.getDate() - 365);
+  document.getElementById('endDate').value   = fmt(today);
+  document.getElementById('startDate').value = fmt(past);
+})();
+
+function fmt(d) { return d.toISOString().split('T')[0]; }
+
+function setMarket(m) {
+  market = m;
+  document.getElementById('btn-IN').classList.toggle('active', m === 'IN');
+  document.getElementById('btn-US').classList.toggle('active', m === 'US');
+  document.getElementById('hdr-mkt').textContent = m === 'IN' ? '🇮🇳 NSE India' : '🇺🇸 US Market';
+}
+setMarket('IN');
+
+function onFile(input) {
+  uploadedFile = input.files[0];
+  document.getElementById('fname').textContent = uploadedFile.name;
+  document.getElementById('fdrop').classList.add('loaded');
+}
+
+function setStatus(msg) { document.getElementById('statusMsg').textContent = msg; }
+
+function setProgress(pct, msg) {
+  document.getElementById('prog').classList.add('show');
+  document.getElementById('progFill').style.width = pct + '%';
+  document.getElementById('progMsg').textContent  = msg;
+  document.getElementById('progPct').textContent  = pct + '%';
+}
+
+function hideProgress() {
+  setTimeout(() => document.getElementById('prog').classList.remove('show'), 800);
+}
+
+async function clearCache() {
+  try {
+    await fetch(BACKEND + '/api/clear-cache', { method: 'POST' });
+    setStatus('Cache cleared.');
+  } catch(e) { setStatus('Could not reach server.'); }
+}
+
+// ── RUN SCREENER ───────────────────────────────────────────────────────────────
+async function runScreen() {
+  if (!uploadedFile) { alert('Upload a Ticker.xlsx first.'); return; }
+
+  const start = document.getElementById('startDate').value;
+  const end   = document.getElementById('endDate').value;
+  if (!start || !end) { alert('Set a date range.'); return; }
+
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  Object.values(charts).forEach(c => c.destroy());
+  charts = {}; G = {};
+  document.getElementById('results').innerHTML = '';
+  setProgress(2, 'Connecting to server…');
+  setStatus('');
+
+  const fd = new FormData();
+  fd.append('tickerFile', uploadedFile);
+  fd.append('market',     market);
+  fd.append('start',      start);
+  fd.append('end',        end);
+  fd.append('minTR',      document.getElementById('minTR').value);
+  fd.append('minMC',      document.getElementById('minMC').value);
+  fd.append('lookback',   document.getElementById('lookback').value);
+
+  try {
+    const resp = await fetch(BACKEND + '/api/screen', { method: 'POST', body: fd });
+    if (!resp.ok) throw new Error(`Server error ${resp.status}`);
+
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let   buf     = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith('data:')) continue;
+        try {
+          const ev = JSON.parse(line.slice(5).trim());
+          handleSSE(ev);
+        } catch(e) {}
+      }
+    }
+  } catch(e) {
+    document.getElementById('results').innerHTML = `
+      <div class="empty">
+        <div class="empty-icon">🔌</div>
+        <h3>Cannot reach the backend server</h3>
+        <p>
+          Run this in Anaconda Prompt:<br><br>
+          <code>cd C:\\Users\\phani\\Downloads</code><br>
+          <code>pip install flask flask-cors aiohttp pandas openpyxl gunicorn</code><br>
+          <code>python garo_server.py</code><br><br>
+          Then open <code>http://localhost:5050</code><br><br>
+          Error: ${e.message}
+        </p>
+      </div>`;
+    setStatus('Server not running.');
+    hideProgress();
+  }
+  btn.disabled = false;
+}
+
+function handleSSE(ev) {
+  if (ev.type === 'start') {
+    setProgress(2, ev.msg);
+  } else if (ev.type === 'progress') {
+    setProgress(ev.pct, ev.msg);
+    if (ev.done && ev.total) setStatus(`Fetched ${ev.done} / ${ev.total} tickers`);
+  } else if (ev.type === 'result') {
+    G = ev;
+    setProgress(100, 'Rendering…');
+    renderDashboard(ev);
+    const s = ev.summary;
+    const errs = ev.errors?.length ? ` · ${ev.errors.length} failed` : '';
+    setStatus(`Done — ${s.fetched} fetched · ${s.passed} passed screener${errs}`);
+    hideProgress();
+  } else if (ev.type === 'done') {
+    hideProgress();
+  }
+}
+
+// ── RENDER DASHBOARD ──────────────────────────────────────────────────────────
+const COLORS = ['#b8ff57','#4da6ff','#ffb938','#ff6b6b','#2dd4bf','#a78bfa','#f97316','#ec4899','#06b6d4','#84cc16','#fb923c','#e879f9'];
+const GX = { grid: 'rgba(255,255,255,0.04)', tick: '#5a6278' };
+const scaleBase = {
+  x: { grid:{color:GX.grid}, ticks:{color:GX.tick, maxTicksLimit:8, font:{family:'Space Mono',size:10}} },
+  y: { grid:{color:GX.grid}, ticks:{color:GX.tick, font:{family:'Space Mono',size:10},
+    callback: v => v==null?'': v>=1e12?'$'+(v/1e12).toFixed(1)+'T': v>=1e9?'$'+(v/1e9).toFixed(1)+'B': v>=1e6?'$'+(v/1e6).toFixed(0)+'M': v.toFixed(4)
+  }}
+};
+
+function rl(arr, w) {
+  return arr.map((_,i) => {
+    if (i < w-1) return null;
+    const s = arr.slice(i-w+1,i+1).filter(v=>v!=null);
+    return s.length ? s.reduce((a,b)=>a+b,0)/s.length : null;
+  });
+}
+
+function renderDashboard(d) {
+  const { shortlist, industryMC, industryVol, totalMCByDate, cumulativeGrowth, allDates, allTickers, errors, summary } = d;
+  const labels      = allDates;
+  const totalArr    = labels.map(dt => totalMCByDate[dt] || 0);
+  const dma5        = rl(totalArr, 5);
+  const dma10       = rl(totalArr, 10);
+  const dma20       = rl(totalArr, 20);
+  const industries  = Object.keys(industryMC);
+  const minTR       = document.getElementById('minTR').value;
+  const minMC       = document.getElementById('minMC').value;
+
+  const errBlock = errors?.length
+    ? `<details class="err-panel"><summary>⚠ ${errors.length} tickers failed to fetch — click to expand</summary>
+       <div style="margin-top:8px;color:var(--fog);font-family:var(--fm);font-size:11px;line-height:1.8">${errors.join(', ')}</div></details>`
+    : '';
+
+  const html = `
+  ${errBlock}
+
+  <div class="metrics" id="metrics-strip"></div>
+
+  <!-- SHORTLIST -->
+  <div class="card" id="card-shortlist">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Shortlisted Stocks</div>
+        <div class="card-sub">Universe: ${allTickers.length} tickers · Filter: avg trading range ≥ ${minTR}% and market cap ≥ $${minMC}B · Sorted by trading range</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn-export" onclick="exportCSV()">↓ Export CSV</button>
+        <button class="btn-ai" onclick="doAI('shortlist',event)">⚡ Analyse</button>
+      </div>
+    </div>
+    <div class="tbl-scroll" id="tbl-shortlist"></div>
+    <div class="aibox" id="ai-shortlist"><div class="ai-label">⚡ AI Analysis</div><div class="ai-text" id="ait-shortlist"></div></div>
+  </div>
+
+  <!-- TOTAL MC -->
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Total Market Cap Over Time</div>
+        <div class="card-sub">Aggregate market cap (close × volume) across all fetched stocks with moving average overlays</div>
+      </div>
+      <button class="btn-ai" onclick="doAI('totalmc',event)">⚡ Analyse</button>
+    </div>
+    <div class="card-legend">
+      <div class="leg-item"><div class="leg-dot" style="background:var(--lime)"></div>Total MC</div>
+      <div class="leg-item"><div class="leg-dot" style="background:var(--sky)"></div>5-DMA</div>
+      <div class="leg-item"><div class="leg-dot" style="background:var(--amber)"></div>10-DMA</div>
+      <div class="leg-item"><div class="leg-dot" style="background:var(--purple)"></div>20-DMA</div>
+    </div>
+    <div class="chart-box" style="height:260px"><canvas id="c-totalmc"></canvas></div>
+    <div class="aibox" id="ai-totalmc"><div class="ai-label">⚡ AI Analysis</div><div class="ai-text" id="ait-totalmc"></div></div>
+  </div>
+
+  <!-- DMA CROSSOVER -->
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">5-DMA vs 10-DMA Crossover</div>
+        <div class="card-sub">5-DMA crossing above 10-DMA signals bullish momentum; crossing below signals bearish shift</div>
+      </div>
+      <button class="btn-ai" onclick="doAI('dma',event)">⚡ Analyse</button>
+    </div>
+    <div class="card-legend">
+      <div class="leg-item"><div class="leg-dot" style="background:var(--sky)"></div>5-DMA</div>
+      <div class="leg-item"><div class="leg-dot" style="background:var(--amber)"></div>10-DMA</div>
+    </div>
+    <div class="chart-box" style="height:220px"><canvas id="c-dma"></canvas></div>
+    <div class="aibox" id="ai-dma"><div class="ai-label">⚡ AI Analysis</div><div class="ai-text" id="ait-dma"></div></div>
+  </div>
+
+  <!-- VOLATILITY -->
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Market Cap Volatility — 30-Day Rolling</div>
+        <div class="card-sub">Standard deviation of daily returns — rising means increasing uncertainty across the universe</div>
+      </div>
+      <button class="btn-ai" onclick="doAI('vol',event)">⚡ Analyse</button>
+    </div>
+    <div class="chart-box" style="height:220px"><canvas id="c-vol"></canvas></div>
+    <div class="aibox" id="ai-vol"><div class="ai-label">⚡ AI Analysis</div><div class="ai-text" id="ait-vol"></div></div>
+  </div>
+
+  <!-- INDUSTRY MC -->
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Market Cap by Industry Over Time</div>
+        <div class="card-sub">Sector-level market cap trends — reveals rotation, leadership, and laggards</div>
+      </div>
+      <button class="btn-ai" onclick="doAI('indmc',event)">⚡ Analyse</button>
+    </div>
+    <div class="chart-box" style="height:300px"><canvas id="c-indmc"></canvas></div>
+    <div class="aibox" id="ai-indmc"><div class="ai-label">⚡ AI Analysis</div><div class="ai-text" id="ait-indmc"></div></div>
+  </div>
+
+  <!-- CUMULATIVE GROWTH -->
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Cumulative Growth by Industry</div>
+        <div class="card-sub">Indexed to 1.0 at period start — shows which sectors compounded the most</div>
+      </div>
+      <button class="btn-ai" onclick="doAI('cumgrowth',event)">⚡ Analyse</button>
+    </div>
+    <div class="chart-box" style="height:300px"><canvas id="c-cumgrowth"></canvas></div>
+    <div class="aibox" id="ai-cumgrowth"><div class="ai-label">⚡ AI Analysis</div><div class="ai-text" id="ait-cumgrowth"></div></div>
+  </div>
+
+  <!-- 2-DAY CHANGE -->
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Industry Market Cap — Last 2 Days</div>
+        <div class="card-sub">Absolute change in $B — green means money flowed in, red means it flowed out</div>
+      </div>
+      <button class="btn-ai" onclick="doAI('2d',event)">⚡ Analyse</button>
+    </div>
+    <div class="chart-box" id="cbox-2d"><canvas id="c-2d"></canvas></div>
+    <div class="aibox" id="ai-2d"><div class="ai-label">⚡ AI Analysis</div><div class="ai-text" id="ait-2d"></div></div>
+  </div>
+
+  <!-- INDUSTRY VOLATILITY -->
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Industry Volatility — Last 30 Days</div>
+        <div class="card-sub">Average daily volatility per sector — highest bars carry the most risk</div>
+      </div>
+      <button class="btn-ai" onclick="doAI('indvol',event)">⚡ Analyse</button>
+    </div>
+    <div class="chart-box" id="cbox-indvol"><canvas id="c-indvol"></canvas></div>
+    <div class="aibox" id="ai-indvol"><div class="ai-label">⚡ AI Analysis</div><div class="ai-text" id="ait-indvol"></div></div>
+  </div>
+  `;
+
+  document.getElementById('results').innerHTML = html;
+
+  // Metrics strip
+  const s = summary;
+  const chgClass = s.mcChg1d >= 0 ? 'up' : 'down';
+  document.getElementById('metrics-strip').innerHTML = `
+    <div class="mc lime"><div class="mc-label">Total Market Cap</div><div class="mc-val">$${(s.lastMC/1e9).toFixed(1)}B</div><div class="mc-sub">${s.mcChgTotal>=0?'+':''}${s.mcChgTotal}% over period</div></div>
+    <div class="mc ${chgClass}"><div class="mc-label">1-Day Change</div><div class="mc-val">${s.mcChg1d>=0?'+':''}${s.mcChg1d}%</div><div class="mc-sub">vs previous session</div></div>
+    <div class="mc sky"><div class="mc-label">Universe</div><div class="mc-val">${s.totalTickers}</div><div class="mc-sub">${s.fetched} fetched · ${s.failed} failed</div></div>
+    <div class="mc amber"><div class="mc-label">Passed Screen</div><div class="mc-val">${s.passed}</div><div class="mc-sub">of ${s.fetched} stocks</div></div>
+    <div class="mc"><div class="mc-label">Industries</div><div class="mc-val">${s.industries}</div><div class="mc-sub">sectors tracked</div></div>
+    <div class="mc"><div class="mc-label">Period</div><div class="mc-val">${labels.length}d</div><div class="mc-sub">${s.dateRange[0]} → ${s.dateRange[1]}</div></div>
+  `;
+
+  // Shortlist table
+  const sl = [...shortlist].sort((a,b)=>b.avgTR-a.avgTR);
+  document.getElementById('tbl-shortlist').innerHTML = sl.length
+    ? `<table>
+        <thead><tr><th>#</th><th>Ticker</th><th>Industry</th><th>Avg TR</th><th>Market Cap</th><th>Last Close</th><th>5-DMA</th><th>20-DMA</th><th>Signal</th></tr></thead>
+        <tbody>${sl.map((s,i)=>`<tr>
+          <td style="color:var(--dust);font-family:var(--fm)">${i+1}</td>
+          <td class="t-ticker">${s.ticker}</td>
+          <td style="color:var(--fog)">${s.industry}</td>
+          <td style="font-family:var(--fm)">${s.avgTR.toFixed(2)}%</td>
+          <td style="font-family:var(--fm)">$${s.marketCap.toFixed(2)}B</td>
+          <td style="font-family:var(--fm)">$${s.latestClose.toFixed(2)}</td>
+          <td class="${s.aboveDMA5?'dma-up':'dma-dn'}">${s.aboveDMA5!=null?(s.aboveDMA5?'▲ above':'▼ below'):'—'}</td>
+          <td class="${s.aboveDMA20?'dma-up':'dma-dn'}">${s.aboveDMA20!=null?(s.aboveDMA20?'▲ above':'▼ below'):'—'}</td>
+          <td><span class="badge ${s.avgTR>=5?'badge-hi':s.avgTR>=3?'badge-md':'badge-lo'}">${s.avgTR>=5?'High':s.avgTR>=3?'Moderate':'Low'}</span></td>
+        </tr>`).join('')}
+        </tbody>
+      </table>`
+    : `<p style="color:var(--fog);padding:16px;font-size:13px">No stocks passed the criteria. Try lowering the thresholds.</p>`;
+
+  setTimeout(() => buildCharts(labels, totalArr, dma5, dma10, dma20, industries, industryMC, cumulativeGrowth), 60);
+}
+
+function buildCharts(labels, totalArr, dma5, dma10, dma20, industries, industryMC, cumulativeGrowth) {
+  // Chart 1: Total MC
+  charts['totalmc'] = new Chart(document.getElementById('c-totalmc'), {
+    type: 'line',
+    data: { labels, datasets: [
+      { label:'Total MC', data:totalArr, borderColor:'#b8ff57', borderWidth:2, pointRadius:0, tension:.3, fill:true, backgroundColor:'rgba(184,255,87,0.04)' },
+      { label:'5-DMA',   data:dma5,     borderColor:'#4da6ff', borderWidth:1.5, borderDash:[4,4], pointRadius:0, tension:.3 },
+      { label:'10-DMA',  data:dma10,    borderColor:'#ffb938', borderWidth:1.5, borderDash:[4,4], pointRadius:0, tension:.3 },
+      { label:'20-DMA',  data:dma20,    borderColor:'#a78bfa', borderWidth:1.5, borderDash:[2,4], pointRadius:0, tension:.3 },
+    ]},
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:scaleBase }
+  });
+
+  // Chart 2: DMA crossover
+  charts['dma'] = new Chart(document.getElementById('c-dma'), {
+    type: 'line',
+    data: { labels, datasets: [
+      { label:'5-DMA',  data:dma5,  borderColor:'#4da6ff', borderWidth:2, pointRadius:0, tension:.3 },
+      { label:'10-DMA', data:dma10, borderColor:'#ffb938', borderWidth:2, borderDash:[5,3], pointRadius:0, tension:.3 },
+    ]},
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:scaleBase }
+  });
+
+  // Chart 3: Volatility
+  const dRet = totalArr.map((v,i) => i===0||!totalArr[i-1]?null:Math.abs((v-totalArr[i-1])/totalArr[i-1]));
+  const v30  = rl(dRet, 30);
+  charts['vol'] = new Chart(document.getElementById('c-vol'), {
+    type: 'line',
+    data: { labels, datasets:[{ label:'Volatility', data:v30, borderColor:'#ff6b6b', borderWidth:2, pointRadius:0, fill:true, backgroundColor:'rgba(255,107,107,0.05)', tension:.3 }]},
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{ x:scaleBase.x, y:{...scaleBase.y, ticks:{...scaleBase.y.ticks, callback:v=>v==null?'':(v*100).toFixed(3)+'%'}} } }
+  });
+
+  // Chart 4: Industry MC
+  charts['indmc'] = new Chart(document.getElementById('c-indmc'), {
+    type: 'line',
+    data: { labels, datasets: industries.map((ind,i)=>({
+      label: ind,
+      data:  labels.map(dt => industryMC[ind]?.[dt] || 0),
+      borderColor: COLORS[i%COLORS.length], borderWidth:2, pointRadius:0, tension:.3, fill:false
+    }))},
+    options: { responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:true, labels:{color:GX.tick, font:{family:'Space Mono',size:10}, boxWidth:10, padding:14} } },
+      scales: scaleBase }
+  });
+
+  // Chart 5: Cumulative growth
+  charts['cumgrowth'] = new Chart(document.getElementById('c-cumgrowth'), {
+    type: 'line',
+    data: { labels, datasets: industries.map((ind,i)=>({
+      label: ind,
+      data:  cumulativeGrowth[ind] || [],
+      borderColor: COLORS[i%COLORS.length], borderWidth:2, pointRadius:0, tension:.3, fill:false
+    }))},
+    options: { responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:true, labels:{color:GX.tick, font:{family:'Space Mono',size:10}, boxWidth:10, padding:14} } },
+      scales:{ x:scaleBase.x, y:{...scaleBase.y, ticks:{...scaleBase.y.ticks, callback:v=>v==null?'':v.toFixed(2)+'x'}} } }
+  });
+
+  // Chart 6: 2-day change
+  const last2 = labels.slice(-2);
+  const chg2  = industries.map(ind => ({
+    ind, val: ((G.industryMC[ind]?.[last2[1]]||0) - (G.industryMC[ind]?.[last2[0]]||0)) / 1e9
+  })).sort((a,b) => b.val - a.val);
+  document.getElementById('cbox-2d').style.height = Math.max(200, chg2.length*44+80)+'px';
+  charts['2d'] = new Chart(document.getElementById('c-2d'), {
+    type: 'bar',
+    data: { labels: chg2.map(x=>x.ind), datasets:[{ label:'$B', data:chg2.map(x=>x.val),
+      backgroundColor: chg2.map(x=>x.val>=0?'rgba(45,212,191,.7)':'rgba(255,107,107,.7)'), borderRadius:4 }]},
+    options: { indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{ x:{grid:{color:GX.grid},ticks:{color:GX.tick,font:{family:'Space Mono',size:10},callback:v=>v.toFixed(1)+'B'}},
+               y:{grid:{color:'transparent'},ticks:{color:GX.tick,font:{family:'Space Mono',size:11}}} } }
+  });
+
+  // Chart 7: Industry volatility
+  const indVols = industries.map(ind => {
+    const vals = labels.map(dt => G.industryMC[ind]?.[dt] || 0);
+    const rets = vals.map((v,i) => i===0||!vals[i-1]?null:Math.abs((v-vals[i-1])/vals[i-1]));
+    const r30  = rets.slice(-30).filter(v=>v!=null);
+    return { ind, vol: r30.length ? r30.reduce((a,b)=>a+b,0)/r30.length : 0 };
+  }).sort((a,b) => b.vol-a.vol);
+  document.getElementById('cbox-indvol').style.height = Math.max(200, indVols.length*44+80)+'px';
+  charts['indvol'] = new Chart(document.getElementById('c-indvol'), {
+    type: 'bar',
+    data: { labels: indVols.map(x=>x.ind), datasets:[{ label:'Avg Vol', data:indVols.map(x=>x.vol),
+      backgroundColor:'rgba(255,185,56,.65)', borderRadius:4 }]},
+    options: { indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+      scales:{ x:{grid:{color:GX.grid},ticks:{color:GX.tick,font:{family:'Space Mono',size:10},callback:v=>(v*100).toFixed(3)+'%'}},
+               y:{grid:{color:'transparent'},ticks:{color:GX.tick,font:{family:'Space Mono',size:11}}} } }
+  });
+}
+
+// ── EXPORT CSV ─────────────────────────────────────────────────────────────────
+function exportCSV() {
+  if (!G.shortlist?.length) return;
+  const rows = [['Ticker','Industry','Avg TR %','Market Cap $B','Last Close','Above 5-DMA','Above 20-DMA']];
+  G.shortlist.forEach(s => rows.push([s.ticker,s.industry,s.avgTR,s.marketCap,s.latestClose,s.aboveDMA5,s.aboveDMA20]));
+  const csv  = rows.map(r=>r.join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = `garo_shortlist_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+}
+
+// ── AI ANALYSIS ────────────────────────────────────────────────────────────────
+async function doAI(id, evt) {
+  const btn  = evt.target;
+  btn.disabled = true;
+  const box  = document.getElementById(`ai-${id}`);
+  const text = document.getElementById(`ait-${id}`);
+  box.classList.add('show');
+  text.className = 'ai-text loading';
+  text.textContent = 'Generating analysis…';
+
+  const apiKey = document.getElementById('apiKey').value.trim();
+  if (!apiKey) {
+    text.className = 'ai-text'; text.style.color='var(--dust)';
+    text.textContent = 'Enter your Anthropic API key in the control panel to enable AI analysis.';
+    btn.disabled = false; return;
+  }
+
+  const { shortlist, industryMC, totalMCByDate, allDates, allTickers, summary, cumulativeGrowth } = G;
+  const labels   = allDates;
+  const totalArr = labels.map(dt=>totalMCByDate[dt]||0);
+  const dma5     = rl(totalArr,5);
+  const dma10    = rl(totalArr,10);
+  const industries = Object.keys(industryMC);
+  const mkt      = market === 'IN' ? 'NSE India' : 'US';
+  const minTR    = document.getElementById('minTR').value;
+  const minMC    = document.getElementById('minMC').value;
+
+  let prompt = '';
+
+  if (id === 'shortlist') {
+    const top = shortlist.slice(0,20).map(s=>`${s.ticker}(TR:${s.avgTR}%,MC:$${s.marketCap}B,${s.industry},${s.aboveDMA5?'above':'below'} 5DMA)`).join(', ');
+    prompt = `You are a senior equity analyst reviewing a stock screener output for the ${mkt} market.
+Universe: ${allTickers.length} stocks. Period: ${summary.dateRange[0]} to ${summary.dateRange[1]}.
+Screen criteria: avg trading range ≥ ${minTR}%, market cap ≥ $${minMC}B.
+Passed: ${shortlist.length} of ${summary.fetched} stocks.
+Top candidates: ${top || 'none'}.
+Write 5-6 sentences: evaluate the quality and diversity of this shortlist, call out the most compelling candidates by name with reasoning, flag any sector concentration risk, note which stocks are trading above their 5-DMA (momentum confirmation), and give clear next steps for due diligence.`;
+
+  } else if (id === 'totalmc') {
+    const l5=dma5[dma5.length-1]||0, l10=dma10[dma10.length-1]||0;
+    const first=totalArr[0], last=totalArr[totalArr.length-1];
+    prompt = `Financial analysis for ${mkt} market universe (${allTickers.length} stocks). Period: ${summary.dateRange[0]} → ${summary.dateRange[1]}.
+Starting MC: $${(first/1e9).toFixed(1)}B → Current: $${(last/1e9).toFixed(1)}B. Total change: ${summary.mcChgTotal}%. 1-day change: ${summary.mcChg1d}%.
+5-DMA: $${(l5/1e9).toFixed(1)}B vs 10-DMA: $${(l10/1e9).toFixed(1)}B. Signal: ${l5>l10?'BULLISH (5-DMA above 10-DMA)':'BEARISH (10-DMA above 5-DMA)'}.
+Write 4-5 sentences: characterise the overall trend, interpret the DMA signal, assess market health, and give a clear actionable view for traders.`;
+
+  } else if (id === 'dma') {
+    const l5=dma5[dma5.length-1]||0, l10=dma10[dma10.length-1]||0;
+    const signal = l5>l10?'BULLISH':'BEARISH';
+    prompt = `DMA crossover analysis for ${mkt} (${allTickers.length} stocks). Period: ${summary.dateRange[0]} → ${summary.dateRange[1]}.
+Current signal: ${signal}. 5-DMA: $${(l5/1e9).toFixed(1)}B, 10-DMA: $${(l10/1e9).toFixed(1)}B.
+Write 4 sentences: interpret the crossover signal, its reliability for this market, entry/exit strategy implications, and any caveats or confirmation signals to watch.`;
+
+  } else if (id === 'vol') {
+    const dRet=totalArr.map((v,i)=>i===0?null:Math.abs((v-(totalArr[i-1]||v))/(totalArr[i-1]||1)));
+    const r30=dRet.slice(-30).filter(v=>v!=null);
+    const avgV=(r30.reduce((a,b)=>a+b,0)/Math.max(r30.length,1)*100).toFixed(3);
+    prompt = `Volatility analysis for ${mkt} universe (${allTickers.length} stocks). Period: ${summary.dateRange[0]} → ${summary.dateRange[1]}.
+30-day average daily volatility: ${avgV}%. 1-day market cap change: ${summary.mcChg1d}%.
+Write 4 sentences: characterise the volatility regime, compare to what is typical, give position sizing implications, and state whether conditions favour momentum or mean-reversion strategies.`;
+
+  } else if (id === 'indmc') {
+    const indPerf = industries.map(ind=>{
+      const vals=labels.map(dt=>industryMC[ind]?.[dt]||0);
+      const f=vals[0]||1, l=vals[vals.length-1];
+      return `${ind}: ${((l-f)/f*100).toFixed(1)}%`;
+    }).join(' | ');
+    prompt = `Sector rotation analysis for ${mkt}. Period: ${summary.dateRange[0]} → ${summary.dateRange[1]}.
+Industry performance: ${indPerf}.
+Write 5 sentences: identify which sectors led and which lagged, describe any rotation pattern, interpret macro implications, and give a view on which sectors offer the best risk/reward going forward.`;
+
+  } else if (id === 'cumgrowth') {
+    const best  = industries.map(ind=>({ ind, final:(cumulativeGrowth[ind]||[]).slice(-1)[0]||1 })).sort((a,b)=>b.final-a.final);
+    const top3  = best.slice(0,3).map(x=>`${x.ind}(${x.final.toFixed(2)}x)`).join(', ');
+    const bot3  = best.slice(-3).map(x=>`${x.ind}(${x.final.toFixed(2)}x)`).join(', ');
+    prompt = `Cumulative growth analysis for ${mkt}. Period: ${summary.dateRange[0]} → ${summary.dateRange[1]}.
+Top compounding sectors: ${top3}. Laggards: ${bot3}.
+Write 4-5 sentences: explain the growth dispersion, what drove the top sectors, what held back the laggards, and what this signals for future allocation.`;
+
+  } else if (id === '2d') {
+    const last2=labels.slice(-2);
+    const chg=industries.map(ind=>({ind,val:((industryMC[ind]?.[last2[1]]||0)-(industryMC[ind]?.[last2[0]]||0))/1e9})).sort((a,b)=>b.val-a.val);
+    const gainers=chg.slice(0,3).map(x=>`${x.ind}: +$${x.val.toFixed(2)}B`).join(', ');
+    const losers=chg.slice(-3).map(x=>`${x.ind}: $${x.val.toFixed(2)}B`).join(', ');
+    prompt = `Short-term money flow for ${mkt}. Dates: ${last2[0]} → ${last2[1]}.
+Top inflows: ${gainers}. Top outflows: ${losers}.
+Write 4 sentences: interpret the money flow, identify likely catalysts, call out which sectors to watch in the next session, and give specific tactical trade ideas.`;
+
+  } else if (id === 'indvol') {
+    const indVols=industries.map(ind=>{
+      const vals=labels.map(dt=>industryMC[ind]?.[dt]||0);
+      const rets=vals.map((v,i)=>i===0?null:Math.abs((v-(vals[i-1]||v))/(vals[i-1]||1)));
+      const r=rets.slice(-30).filter(v=>v!=null);
+      return `${ind}:${(r.reduce((a,b)=>a+b,0)/Math.max(r.length,1)*100).toFixed(3)}%`;
+    }).join(', ');
+    prompt = `Sector risk ranking for ${mkt}. 30-day avg daily volatility: ${indVols}.
+Write 4 sentences: rank highest and lowest risk sectors, explain what this tells us about market structure, give portfolio construction implications, and identify sectors with the best risk-adjusted opportunity.`;
+  }
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1024,
+        messages: [{ role:'user', content: prompt }]
+      })
+    });
+    const data = await res.json();
+    const out  = data.content?.map(c=>c.text||'').join('') || data.error?.message || 'No response.';
+    text.className = 'ai-text';
+    text.textContent = out;
+  } catch(e) {
+    text.className = 'ai-text'; text.style.color='var(--dust)';
+    text.textContent = `Error: ${e.message}`;
+  }
+  btn.disabled = false;
+}
+</script>
+</body>
+</html>
