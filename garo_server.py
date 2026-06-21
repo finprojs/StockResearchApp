@@ -133,6 +133,29 @@ def compute_metrics(df):
 def rolling_mean_s(s, w):
     return s.rolling(window=w, min_periods=max(1, w // 2)).mean()
 
+def compute_rsi(series, period=14):
+    delta    = series.diff()
+    gain     = delta.clip(lower=0)
+    loss     = (-delta).clip(lower=0)
+    avg_gain = gain.ewm(com=period-1, min_periods=period).mean()
+    avg_loss = loss.ewm(com=period-1, min_periods=period).mean()
+    rs  = avg_gain / avg_loss.replace(0, np.nan)
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def compute_volume_spike(volume_series, window=20):
+    avg_vol = volume_series.rolling(window=window, min_periods=max(1, window//2)).mean()
+    ratio   = volume_series / avg_vol.replace(0, np.nan)
+    return ratio
+
+def rsi_signal(v):
+    if v is None or np.isnan(v): return 'N/A'
+    if v >= 70: return 'Overbought'
+    if v <= 30: return 'Oversold'
+    if v >= 55: return 'Bullish'
+    if v <= 45: return 'Bearish'
+    return 'Neutral'
+
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
@@ -283,21 +306,48 @@ def screen():
                     industry_vol[industry][d]  = industry_vol[industry].get(d, 0) + vol
                     total_mc_by_date[d]        = total_mc_by_date.get(d, 0) + mc
 
+                # RSI-14
+                rsi_series  = compute_rsi(df['Close'])
+                rsi_val     = float(rsi_series.iloc[-1]) if not rsi_series.empty else None
+                rsi_val     = None if (rsi_val is not None and np.isnan(rsi_val)) else rsi_val
+                rsi_label   = rsi_signal(rsi_val if rsi_val is not None else float('nan'))
+
+                # Volume spike
+                vol_ratio_series = compute_volume_spike(df['Volume'])
+                vol_ratio        = float(vol_ratio_series.iloc[-1]) if not vol_ratio_series.empty else None
+                vol_ratio        = None if (vol_ratio is not None and np.isnan(vol_ratio)) else vol_ratio
+                vol_spike        = bool(vol_ratio >= 2.0) if vol_ratio is not None else False
+
+                # 52-week high/low
+                high_52w = float(df['High'].max())
+                low_52w  = float(df['Low'].min())
+                pct_from_high = round((float(last['Close']) - high_52w) / high_52w * 100, 2) if high_52w else None
+                pct_from_low  = round((float(last['Close']) - low_52w)  / low_52w  * 100, 2) if low_52w  else None
+
                 if passes:
                     dma5  = rolling_mean_s(df['Close'], 5).iloc[-1]
                     dma20 = rolling_mean_s(df['Close'], 20).iloc[-1]
                     shortlist.append({
-                        'ticker':      ticker,
-                        'industry':    industry,
-                        'avgTR':       round(avg_tr * 100, 2),
-                        'marketCap':   round(mc_bn, 3),
-                        'latestClose': round(float(last['Close']), 2),
-                        'dma5':        round(float(dma5),  2) if not np.isnan(float(dma5))  else None,
-                        'dma20':       round(float(dma20), 2) if not np.isnan(float(dma20)) else None,
-                        'aboveDMA5':   bool(float(last['Close']) > float(dma5))  if not np.isnan(float(dma5))  else None,
-                        'aboveDMA20':  bool(float(last['Close']) > float(dma20)) if not np.isnan(float(dma20)) else None,
+                        'ticker':        ticker,
+                        'industry':      industry,
+                        'avgTR':         round(avg_tr * 100, 2),
+                        'marketCap':     round(mc_bn, 3),
+                        'latestClose':   round(float(last['Close']), 2),
+                        'dma5':          round(float(dma5),  2) if not np.isnan(float(dma5))  else None,
+                        'dma20':         round(float(dma20), 2) if not np.isnan(float(dma20)) else None,
+                        'aboveDMA5':     bool(float(last['Close']) > float(dma5))  if not np.isnan(float(dma5))  else None,
+                        'aboveDMA20':    bool(float(last['Close']) > float(dma20)) if not np.isnan(float(dma20)) else None,
+                        'rsi':           round(rsi_val, 1) if rsi_val is not None else None,
+                        'rsiLabel':      rsi_label,
+                        'volRatio':      round(vol_ratio, 2) if vol_ratio is not None else None,
+                        'volSpike':      vol_spike,
+                        'high52w':       round(high_52w, 2),
+                        'low52w':        round(low_52w,  2),
+                        'pctFromHigh':   pct_from_high,
+                        'pctFromLow':    pct_from_low,
                     })
-                    print(f"  ✓ PASS {ticker:12s} TR={avg_tr*100:.2f}% MC=${mc_bn:.2f}B [{industry}]")
+                    spike_str = " 🔥 VOL SPIKE" if vol_spike else ""
+                    print(f"  ✓ PASS {ticker:12s} TR={avg_tr*100:.2f}% MC=${mc_bn:.2f}B RSI={rsi_val:.1f if rsi_val else 'N/A'} [{industry}]{spike_str}")
                 else:
                     print(f"  – skip {ticker:12s} TR={avg_tr*100:.2f}% MC=${mc_bn:.2f}B")
 
@@ -370,12 +420,17 @@ def clear_cache():
 
 
 if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5050))
     print("\n" + "="*55)
     print("  GARO Algo  |  Stock Screener Backend")
     print("  Data source : Yahoo Finance (yfinance)")
     print("  Batch size  : 100 tickers per call")
     print("  Retry logic : 3 attempts, 60s wait")
     print("  Cache TTL   : 12 hours")
-    print("  URL         : http://localhost:5050")
+    print(f"  URL         : http://localhost:{port}")
     print("="*55 + "\n")
-    app.run(port=5050, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+
+
+# Render.com requires binding to 0.0.0.0 and using the PORT env variable
+# The __main__ block above handles local dev; gunicorn handles Render automatically
