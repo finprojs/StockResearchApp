@@ -157,6 +157,83 @@ def rsi_signal(v):
     return 'Neutral'
 
 
+
+# -- MACD -------------------------------------------------------------------
+
+def compute_macd(series, fast=12, slow=26, signal=9):
+    ema_fast    = series.ewm(span=fast,   adjust=False, min_periods=fast).mean()
+    ema_slow    = series.ewm(span=slow,   adjust=False, min_periods=slow).mean()
+    macd_line   = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False, min_periods=signal).mean()
+    histogram   = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+
+# -- Bollinger Bands --------------------------------------------------------
+
+def compute_bollinger(series, window=20, num_std=2):
+    sma   = series.rolling(window=window, min_periods=max(1, window//2)).mean()
+    std   = series.rolling(window=window, min_periods=max(1, window//2)).std()
+    upper = sma + num_std * std
+    lower = sma - num_std * std
+    pct_b = (series - lower) / (upper - lower).replace(0, np.nan)
+    bw    = (upper - lower) / sma.replace(0, np.nan)
+    return upper, sma, lower, pct_b, bw
+
+
+# -- Composite Score --------------------------------------------------------
+
+def compute_composite_score(avg_tr, rsi, vol_ratio, above_dma5, above_dma20,
+                             pct_from_high, macd_hist):
+    score = 0.0
+    # Trading Range 0-20
+    if avg_tr is not None and not np.isnan(avg_tr):
+        score += min(20, avg_tr * 100 * 4)
+    # RSI 0-20
+    if rsi is not None and not np.isnan(rsi):
+        if 50 <= rsi <= 65:      score += 20
+        elif 45 <= rsi < 50:     score += 15
+        elif 65 < rsi <= 70:     score += 12
+        elif 40 <= rsi < 45:     score += 10
+        elif rsi > 70:           score += 5
+        elif 30 <= rsi < 40:     score += 8
+        else:                    score += 3
+    # Volume 0-20
+    if vol_ratio is not None and not np.isnan(vol_ratio):
+        if vol_ratio >= 3.0:     score += 20
+        elif vol_ratio >= 2.0:   score += 16
+        elif vol_ratio >= 1.5:   score += 10
+        elif vol_ratio >= 1.0:   score += 5
+    # DMA alignment 0-15
+    if above_dma5 and above_dma20:            score += 15
+    elif above_dma5 and not above_dma20:      score += 7
+    elif not above_dma5 and above_dma20:      score += 4
+    # Proximity to 52w high 0-15
+    if pct_from_high is not None and not np.isnan(pct_from_high):
+        d = abs(pct_from_high)
+        if d <= 2:               score += 15
+        elif d <= 5:             score += 12
+        elif d <= 10:            score += 8
+        elif d <= 20:            score += 4
+    # MACD histogram 0-10
+    if macd_hist is not None and not np.isnan(macd_hist):
+        if macd_hist > 0:        score += 10
+        elif macd_hist > -0.5:   score += 4
+    return round(min(100, score), 1)
+
+
+def is_breakout(rsi, vol_ratio, pct_from_high, above_dma5, above_dma20, macd_hist):
+    if rsi is None or vol_ratio is None or pct_from_high is None:
+        return False
+    return (
+        abs(pct_from_high) <= 5 and
+        vol_ratio >= 1.5 and
+        50 <= rsi <= 72 and
+        above_dma5 and above_dma20 and
+        (macd_hist is None or macd_hist > 0)
+    )
+
+
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 @app.route('/')
@@ -327,6 +404,50 @@ def screen():
                 if passes:
                     dma5  = rolling_mean_s(df['Close'], 5).iloc[-1]
                     dma20 = rolling_mean_s(df['Close'], 20).iloc[-1]
+                    above5  = bool(float(last['Close']) > float(dma5))  if not np.isnan(float(dma5))  else False
+                    above20 = bool(float(last['Close']) > float(dma20)) if not np.isnan(float(dma20)) else False
+
+                    # MACD
+                    macd_line, macd_signal, macd_hist_s = compute_macd(df['Close'])
+                    macd_val    = float(macd_line.iloc[-1])   if not macd_line.empty   else None
+                    macd_sig    = float(macd_signal.iloc[-1]) if not macd_signal.empty else None
+                    macd_hist_v = float(macd_hist_s.iloc[-1]) if not macd_hist_s.empty else None
+                    macd_val    = None if (macd_val    is not None and np.isnan(macd_val))    else macd_val
+                    macd_sig    = None if (macd_sig    is not None and np.isnan(macd_sig))    else macd_sig
+                    macd_hist_v = None if (macd_hist_v is not None and np.isnan(macd_hist_v)) else macd_hist_v
+                    macd_cross  = (macd_val > macd_sig) if (macd_val is not None and macd_sig is not None) else None
+
+                    # Bollinger Bands
+                    bb_upper_s, bb_mid_s, bb_lower_s, pct_b_s, bw_s = compute_bollinger(df['Close'])
+                    bb_upper = float(bb_upper_s.iloc[-1]) if not bb_upper_s.empty else None
+                    bb_mid   = float(bb_mid_s.iloc[-1])   if not bb_mid_s.empty   else None
+                    bb_lower = float(bb_lower_s.iloc[-1]) if not bb_lower_s.empty else None
+                    pct_b    = float(pct_b_s.iloc[-1])    if not pct_b_s.empty    else None
+                    bb_upper = None if (bb_upper is not None and np.isnan(bb_upper)) else bb_upper
+                    bb_mid   = None if (bb_mid   is not None and np.isnan(bb_mid))   else bb_mid
+                    bb_lower = None if (bb_lower is not None and np.isnan(bb_lower)) else bb_lower
+                    pct_b    = None if (pct_b    is not None and np.isnan(pct_b))    else pct_b
+
+                    # BB position label
+                    if pct_b is not None:
+                        if pct_b >= 1.0:    bb_pos = 'Above Upper'
+                        elif pct_b >= 0.8:  bb_pos = 'Near Upper'
+                        elif pct_b <= 0.0:  bb_pos = 'Below Lower'
+                        elif pct_b <= 0.2:  bb_pos = 'Near Lower'
+                        else:               bb_pos = 'Middle'
+                    else:
+                        bb_pos = 'N/A'
+
+                    # Composite Score
+                    comp_score = compute_composite_score(
+                        avg_tr, rsi_val, vol_ratio, above5, above20,
+                        pct_from_high, macd_hist_v
+                    )
+
+                    # Breakout flag
+                    breakout = is_breakout(rsi_val, vol_ratio, pct_from_high,
+                                           above5, above20, macd_hist_v)
+
                     shortlist.append({
                         'ticker':        ticker,
                         'industry':      industry,
@@ -335,8 +456,8 @@ def screen():
                         'latestClose':   round(float(last['Close']), 2),
                         'dma5':          round(float(dma5),  2) if not np.isnan(float(dma5))  else None,
                         'dma20':         round(float(dma20), 2) if not np.isnan(float(dma20)) else None,
-                        'aboveDMA5':     bool(float(last['Close']) > float(dma5))  if not np.isnan(float(dma5))  else None,
-                        'aboveDMA20':    bool(float(last['Close']) > float(dma20)) if not np.isnan(float(dma20)) else None,
+                        'aboveDMA5':     above5,
+                        'aboveDMA20':    above20,
                         'rsi':           round(rsi_val, 1) if rsi_val is not None else None,
                         'rsiLabel':      rsi_label,
                         'volRatio':      round(vol_ratio, 2) if vol_ratio is not None else None,
@@ -345,9 +466,23 @@ def screen():
                         'low52w':        round(low_52w,  2),
                         'pctFromHigh':   pct_from_high,
                         'pctFromLow':    pct_from_low,
+                        'macd':          round(macd_val,    4) if macd_val    is not None else None,
+                        'macdSignal':    round(macd_sig,    4) if macd_sig    is not None else None,
+                        'macdHist':      round(macd_hist_v, 4) if macd_hist_v is not None else None,
+                        'macdCross':     macd_cross,
+                        'bbUpper':       round(bb_upper, 2) if bb_upper is not None else None,
+                        'bbMid':         round(bb_mid,   2) if bb_mid   is not None else None,
+                        'bbLower':       round(bb_lower, 2) if bb_lower is not None else None,
+                        'pctB':          round(pct_b,    3) if pct_b    is not None else None,
+                        'bbPosition':    bb_pos,
+                        'compositeScore': comp_score,
+                        'breakout':      breakout,
                     })
-                    spike_str = " 🔥 VOL SPIKE" if vol_spike else ""
-                    print(f"  ✓ PASS {ticker:12s} TR={avg_tr*100:.2f}% MC=${mc_bn:.2f}B RSI={rsi_val:.1f if rsi_val else 'N/A'} [{industry}]{spike_str}")
+                    flags = []
+                    if breakout:  flags.append("🚀 BREAKOUT")
+                    if vol_spike: flags.append("🔥 VOL SPIKE")
+                    flag_str = " " + " ".join(flags) if flags else ""
+                    print(f"  ✓ PASS {ticker:12s} Score={comp_score:5.1f} TR={avg_tr*100:.1f}% RSI={rsi_val:.0f if rsi_val else 0} MC=${mc_bn:.1f}B [{industry}]{flag_str}")
                 else:
                     print(f"  – skip {ticker:12s} TR={avg_tr*100:.2f}% MC=${mc_bn:.2f}B")
 
